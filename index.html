@@ -73,6 +73,11 @@ body::before{content:'';position:fixed;inset:0;background:url("data:image/svg+xm
 .course-meta span{font-size:.58rem;color:var(--txt3);display:flex;align-items:center;gap:3px}
 .course-btn{display:block;margin:0 14px 14px;padding:10px;border-radius:8px;text-align:center;font-size:.75rem;font-weight:700;background:var(--pri3);color:#fff;transition:all .25s;text-decoration:none}
 .course-btn:hover{background:var(--pri)}
+.course-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--brd);border-bottom:1px solid var(--brd);margin:0 0 0}
+.cs{text-align:center;padding:10px 4px;border-right:1px solid var(--brd)}
+.cs:last-child{border-right:none}
+.cs b{display:block;font-size:.95rem;font-weight:800;color:var(--pri)}
+.cs span{font-size:.48rem;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
 
 /* LOADING */
 .loading{text-align:center;padding:40px;color:var(--txt3);font-size:.8rem}
@@ -338,144 +343,119 @@ function showMsg(id,txt,type){
 }
 
 // ====== COURSE AUTO-DETECTION ======
+const KNOWN_COURSES=[
+  {name:'Dominando Tráfego Pago',desc:'De zero a gestor de elite. Meta Ads, Google Ads, criativos, escala e muito mais. O curso mais completo do Brasil.',modules:117,topics:819,hours:234,quizzes:117,category:'Marketing Digital',file:'dominando-trafego-pago.html'}
+];
+
 async function loadCourses(){
   const grid=document.getElementById('courseGrid');
-  
-  // Check cache
   const cached=getCache();
-  if(cached){renderCourses(cached);return}
-  
+  if(cached&&cached.length){renderCourses(cached);return}
+  let courses=[];
+  // METHOD 1: GitHub API
   try{
-    // 1. List files from GitHub API
-    const res=await fetch(`https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/`);
-    if(!res.ok)throw new Error('API failed');
-    const files=await res.json();
-    
-    // 2. Filter HTML course files
-    const htmlFiles=files.filter(f=>
-      f.name.endsWith('.html')&&
-      f.name!=='index.html'&&
-      !f.name.startsWith('admin')&&
-      f.name!=='404.html'
-    );
-    
-    if(!htmlFiles.length){grid.innerHTML='<div class="loading">Nenhum curso disponível ainda</div>';return}
-    
-    // 3. Fetch metadata from each course
-    const courses=[];
-    for(const f of htmlFiles){
-      const meta=await fetchCourseMeta(f.name);
-      if(meta){
-        meta.file=f.name;
-        courses.push(meta);
-      } else {
-        // Fallback: generate basic info from filename
-        courses.push({
-          name:f.name.replace('.html','').replace(/-/g,' ').replace(/\w/g,l=>l.toUpperCase()),
-          desc:'Curso disponível na Matheus Academy',
-          modules:0,topics:0,hours:0,
-          file:f.name
-        });
+    const ctrl=new AbortController();
+    setTimeout(()=>ctrl.abort(),6000);
+    const res=await fetch('https://api.github.com/repos/'+GITHUB_USER+'/'+GITHUB_REPO+'/contents/',{signal:ctrl.signal});
+    if(res.ok){
+      const files=await res.json();
+      const htmlFiles=files.filter(function(f){return f.name.endsWith('.html')&&f.name!=='index.html'&&!f.name.startsWith('admin')&&f.name!=='404.html'});
+      for(let j=0;j<htmlFiles.length;j++){
+        const f=htmlFiles[j];
+        const meta=await fetchMeta('https://'+GITHUB_USER+'.github.io/'+GITHUB_REPO+'/'+f.name);
+        if(meta){meta.file=f.name;courses.push(meta)}
+        else{
+          const known=KNOWN_COURSES.find(function(k){return k.file===f.name});
+          if(known)courses.push(Object.assign({},known));
+          else courses.push({name:prettyName(f.name),desc:'Curso disponível na Matheus Academy',modules:0,topics:0,hours:0,quizzes:0,file:f.name});
+        }
       }
     }
-    
-    setCache(courses);
-    renderCourses(courses);
-    
-  }catch(e){
-    console.log('GitHub API failed, using fallback',e);
-    // Fallback: try to detect courses from same origin
-    const fallback=await detectLocal();
-    if(fallback.length){renderCourses(fallback)}
-    else{grid.innerHTML='<div class="loading">Erro ao carregar. <a href="javascript:location.reload()" style="color:var(--pri)">Tentar novamente</a></div>'}
-  }
-}
-
-async function fetchCourseMeta(filename){
-  try{
-    const url=`https://${GITHUB_USER}.github.io/${GITHUB_REPO}/${filename}`;
-    const res=await fetch(url);
-    const reader=res.body.getReader();
-    const{value}=await reader.read();
-    reader.cancel();
-    const text=new TextDecoder().decode(value);
-    const match=text.match(/<!--COURSE:(.*?)-->/);
-    if(match)return JSON.parse(match[1]);
-  }catch(e){}
-  return null;
-}
-
-async function detectLocal(){
-  // Try known course filenames
-  const known=['dominando-trafego-pago.html'];
-  const courses=[];
-  for(const f of known){
-    try{
-      const res=await fetch('./'+f,{method:'HEAD'});
-      if(res.ok){
-        const meta=await fetchCourseMeta_local(f);
+  }catch(e){console.log('GitHub API:',e)}
+  // METHOD 2: Direct fetch
+  if(!courses.length){
+    for(let j=0;j<KNOWN_COURSES.length;j++){
+      var f=KNOWN_COURSES[j].file;
+      try{
+        var meta=await fetchMeta('./'+f);
         if(meta){meta.file=f;courses.push(meta)}
-      }
-    }catch(e){}
+        else{
+          var res2=await fetch('./'+f,{method:'HEAD'});
+          if(res2.ok)courses.push(Object.assign({},KNOWN_COURSES[j]));
+        }
+      }catch(e2){}
+    }
   }
-  return courses;
+  // METHOD 3: Fallback (ALWAYS works)
+  if(!courses.length){
+    courses=KNOWN_COURSES.map(function(c){return Object.assign({},c)});
+  }
+  setCache(courses);
+  renderCourses(courses);
 }
 
-async function fetchCourseMeta_local(filename){
+async function fetchMeta(url){
   try{
-    const res=await fetch('./'+filename);
-    const reader=res.body.getReader();
-    const{value}=await reader.read();
+    var ctrl=new AbortController();
+    setTimeout(function(){ctrl.abort()},5000);
+    var res=await fetch(url,{signal:ctrl.signal});
+    if(!res.ok)return null;
+    var reader=res.body.getReader();
+    var text='';
+    for(var i=0;i<2;i++){
+      var chunk=await reader.read();
+      if(chunk.value)text+=new TextDecoder().decode(chunk.value);
+      if(chunk.done||text.indexOf('-->')>-1)break;
+    }
     reader.cancel();
-    const text=new TextDecoder().decode(value);
-    const match=text.match(/<!--COURSE:(.*?)-->/);
+    var match=text.match(/<!--COURSE:(.*?)-->/);
     if(match)return JSON.parse(match[1]);
   }catch(e){}
   return null;
+}
+
+function prettyName(f){
+  return f.replace('.html','').split('-').map(function(w){return w.charAt(0).toUpperCase()+w.slice(1)}).join(' ');
 }
 
 function renderCourses(courses){
-  const grid=document.getElementById('courseGrid');
-  let totalM=0,totalT=0,totalH=0;
-  
-  grid.innerHTML=courses.map((c,i)=>{
-    totalM+=c.modules||0;totalT+=c.topics||0;totalH+=c.hours||0;
-    return `
-    <div class="course" onclick="window.open('${c.file}','_self')" style="animation:fu .4s ease ${i*.1}s both">
-      <div class="course-img">
-        <img src="${BANNER_B64}" alt="${c.name}">
-        <div class="badge badge-live">Disponível</div>
-      </div>
-      <div class="course-body">
-        <h4>${c.name}</h4>
-        <p>${c.desc}</p>
-        <div class="course-meta">
-          ${c.modules?`<span>📚 ${c.modules} Módulos</span>`:''}
-          ${c.topics?`<span>📝 ${c.topics} Tópicos</span>`:''}
-          ${c.hours?`<span>⏱️ ${c.hours}h</span>`:''}
-        </div>
-      </div>
-      <div class="course-btn">Acessar Curso →</div>
-    </div>`
-  }).join('');
-  
-  // Update stats
-  document.getElementById('sCursos').textContent=courses.length;
-  document.getElementById('sTopicos').textContent=totalT?totalT+'+':'-';
-  document.getElementById('sModulos').textContent=totalM?totalM+'+':'-';
-  document.getElementById('sHoras').textContent=totalH?totalH+'h+':'-';
+  var grid=document.getElementById('courseGrid');
+  var totalM=0,totalT=0,totalH=0,totalQ=0;
+  var cards='';
+  for(var i=0;i<courses.length;i++){
+    var c=courses[i];
+    totalM+=c.modules||0;
+    totalT+=c.topics||0;
+    totalH+=c.hours||0;
+    totalQ+=c.quizzes||c.modules||0;
+    cards+='<div class="course" onclick="window.open(\''+c.file+'\',\'_self\')" style="animation:fu .4s ease '+(i*.1)+'s both">'
+      +'<div class="course-img"><img src="'+BANNER_B64+'" alt="'+c.name+'"><div class="badge badge-live">Disponível</div></div>'
+      +'<div class="course-body"><h4>'+c.name+'</h4><p>'+(c.desc||'')+'</p></div>'
+      +'<div class="course-stats">'
+      +'<div class="cs"><b>'+(c.modules||'—')+'</b><span>Módulos</span></div>'
+      +'<div class="cs"><b>'+(c.topics||'—')+'</b><span>Tópicos</span></div>'
+      +'<div class="cs"><b>'+(c.hours||'—')+'h</b><span>Horas</span></div>'
+      +'<div class="cs"><b>'+(c.quizzes||c.modules||'—')+'</b><span>Quizzes</span></div>'
+      +'</div>'
+      +'<div class="course-btn">Acessar Curso →</div>'
+      +'</div>';
+  }
+  grid.innerHTML=cards;
+  animN('sCursos',courses.length,'');
+  animN('sTopicos',totalT,'+');
+  animN('sModulos',totalM,'+');
+  animN('sHoras',totalH,'h+');
 }
 
-// ====== CACHE ======
-function getCache(){
-  try{
-    const c=JSON.parse(localStorage.getItem(CACHE_KEY));
-    if(c&&Date.now()-c.ts<CACHE_TTL)return c.data;
-  }catch(e){}
-  return null;
-}
-function setCache(data){
-  localStorage.setItem(CACHE_KEY,JSON.stringify({data,ts:Date.now()}));
+function animN(id,target,suf){
+  var el=document.getElementById(id);
+  if(!target){el.textContent='-';return}
+  var cur=0;var step=Math.max(1,Math.floor(target/25));
+  var t=setInterval(function(){
+    cur+=step;
+    if(cur>=target){cur=target;clearInterval(t)}
+    el.textContent=cur.toLocaleString('pt-BR')+suf;
+  },35);
 }
 
 // ====== INIT ======
