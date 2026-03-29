@@ -344,54 +344,37 @@ function showMsg(id,txt,type){
 
 // ====== COURSE AUTO-DETECTION ======
 const KNOWN_COURSES=[
-  {name:'Dominando Tráfego Pago',desc:'De zero a gestor de elite. Meta Ads, Google Ads, criativos, escala e muito mais. O curso mais completo do Brasil.',modules:117,topics:819,hours:234,quizzes:117,category:'Marketing Digital',file:'dominando-trafego-pago.html'}
+  {name:'Dominando Tráfego Pago',desc:'De zero a gestor de elite. Meta Ads, Google Ads, criativos, escala e muito mais. O curso mais completo do Brasil.',modules:117,topics:819,hours:234,quizzes:117,category:'Marketing Digital',file:'dominando-trafego-pago.html'},
+  {name:'Negócios Inteligentes',desc:'Do zero ao avançado. Mentalidade, marketing digital, vendas, dropshipping, IA, finanças e muito mais.',modules:197,topics:1379,hours:462,quizzes:197,category:'Negócios',file:'negocios-inteligentes.html'}
 ];
 
 async function loadCourses(){
-  const grid=document.getElementById('courseGrid');
-  const cached=getCache();
-  if(cached&&cached.length){renderCourses(cached);return}
-  let courses=[];
-  // METHOD 1: GitHub API
+  // INSTANT: render known courses immediately
+  renderCourses(KNOWN_COURSES);
+  // BACKGROUND: check for new courses via GitHub API
+  setTimeout(function(){scanForNew()},100);
+}
+
+async function scanForNew(){
   try{
-    const ctrl=new AbortController();
-    setTimeout(()=>ctrl.abort(),6000);
-    const res=await fetch('https://api.github.com/repos/'+GITHUB_USER+'/'+GITHUB_REPO+'/contents/',{signal:ctrl.signal});
-    if(res.ok){
-      const files=await res.json();
-      const htmlFiles=files.filter(function(f){return f.name.endsWith('.html')&&f.name!=='index.html'&&!f.name.startsWith('admin')&&f.name!=='404.html'});
-      for(let j=0;j<htmlFiles.length;j++){
-        const f=htmlFiles[j];
-        const meta=await fetchMeta('https://'+GITHUB_USER+'.github.io/'+GITHUB_REPO+'/'+f.name);
-        if(meta){meta.file=f.name;courses.push(meta)}
-        else{
-          const known=KNOWN_COURSES.find(function(k){return k.file===f.name});
-          if(known)courses.push(Object.assign({},known));
-          else courses.push({name:prettyName(f.name),desc:'Curso disponível na Matheus Academy',modules:0,topics:0,hours:0,quizzes:0,file:f.name});
-        }
-      }
+    var ctrl=new AbortController();
+    setTimeout(function(){ctrl.abort()},4000);
+    var res=await fetch('https://api.github.com/repos/'+GITHUB_USER+'/'+GITHUB_REPO+'/contents/',{signal:ctrl.signal});
+    if(!res.ok)return;
+    var files=await res.json();
+    var htmlFiles=files.filter(function(f){return f.name.endsWith('.html')&&f.name!=='index.html'&&!f.name.startsWith('admin')&&f.name!=='404.html'});
+    var knownNames=KNOWN_COURSES.map(function(c){return c.file});
+    var newOnes=htmlFiles.filter(function(f){return knownNames.indexOf(f.name)===-1});
+    if(!newOnes.length)return;
+    var updated=KNOWN_COURSES.map(function(c){return Object.assign({},c)});
+    for(var j=0;j<newOnes.length;j++){
+      var f=newOnes[j];
+      var meta=await fetchMeta('https://'+GITHUB_USER+'.github.io/'+GITHUB_REPO+'/'+f.name);
+      if(meta){meta.file=f.name;updated.push(meta)}
+      else updated.push({name:prettyName(f.name),desc:'Curso disponível na Matheus Academy',modules:0,topics:0,hours:0,quizzes:0,file:f.name});
     }
-  }catch(e){console.log('GitHub API:',e)}
-  // METHOD 2: Direct fetch
-  if(!courses.length){
-    for(let j=0;j<KNOWN_COURSES.length;j++){
-      var f=KNOWN_COURSES[j].file;
-      try{
-        var meta=await fetchMeta('./'+f);
-        if(meta){meta.file=f;courses.push(meta)}
-        else{
-          var res2=await fetch('./'+f,{method:'HEAD'});
-          if(res2.ok)courses.push(Object.assign({},KNOWN_COURSES[j]));
-        }
-      }catch(e2){}
-    }
-  }
-  // METHOD 3: Fallback (ALWAYS works)
-  if(!courses.length){
-    courses=KNOWN_COURSES.map(function(c){return Object.assign({},c)});
-  }
-  setCache(courses);
-  renderCourses(courses);
+    renderCourses(updated);
+  }catch(e){}
 }
 
 async function fetchMeta(url){
